@@ -57,6 +57,12 @@
 ### Added
 
 - bump libwebrtc to m125
+## 0.3.19 (2026-08-14)
+
+### Fixes
+
+- Automatically retry webrtc build downloads
+
 ## 0.3.18 (2026-05-21)
 
 ### Fixes
