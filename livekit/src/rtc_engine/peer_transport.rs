@@ -215,12 +215,16 @@ impl PeerTransport {
     }
 
     /// Maximum x-google-start-bitrate (kbps).
-    /// 1 Mbps is a reasonable ceiling that prevents BWE from starting too aggressively.
-    const MAX_START_BITRATE_KBPS: u32 = 1000;
+    ///
+    /// High-motion 1080p screen shares need substantially more than the
+    /// browser-oriented 1 Mbps default to avoid severe damage while BWE ramps.
+    /// Lower-bitrate camera publications remain bounded by 90% of their own
+    /// advertised target.
+    const MAX_START_BITRATE_KBPS: u32 = 6000;
 
     /// Compute the x-google-start-bitrate value for SDP munging.
     ///
-    /// Returns min(90% of target, 1 Mbps). Returns None if no target bitrate is set
+    /// Returns min(90% of target, 6 Mbps). Returns None if no target bitrate is set
     /// (initial offer before track publish) or if the target is too low.
     fn compute_start_bitrate_kbps(target_bps: Option<u64>) -> Option<u32> {
         let target_bps = target_bps?;
@@ -230,7 +234,7 @@ impl PeerTransport {
             return None;
         }
 
-        // Use 90% of target bitrate as start bitrate, capped at 1 Mbps
+        // Use 90% of target bitrate as start bitrate, capped at 6 Mbps.
         let start_kbps = (target_kbps as f64 * 0.9).round() as u32;
         Some(start_kbps.min(target_kbps).min(Self::MAX_START_BITRATE_KBPS))
     }
@@ -553,6 +557,16 @@ impl PeerTransport {
 #[cfg(test)]
 mod tests {
     use super::PeerTransport;
+
+    #[test]
+    fn high_bitrate_video_starts_at_six_mbps() {
+        assert_eq!(PeerTransport::compute_start_bitrate_kbps(Some(12_000_000)), Some(6000));
+    }
+
+    #[test]
+    fn lower_bitrate_video_starts_below_its_advertised_maximum() {
+        assert_eq!(PeerTransport::compute_start_bitrate_kbps(Some(2_000_000)), Some(1800));
+    }
 
     /// Reproduces the publisher-transport self-deadlock.
     ///
