@@ -16,13 +16,16 @@ use super::{colorcvt, FfiHandle};
 use crate::{proto, server, FfiError, FfiHandleId, FfiResult};
 use livekit::webrtc::{
     prelude::*,
-    video_frame::{FrameMetadata, VideoFrame},
+    video_frame::{
+        EncodedFrameType, EncodedVideoCodec, EncodedVideoFrame, FrameMetadata, VideoFrame,
+    },
 };
 
 pub struct FfiVideoSource {
     pub handle_id: FfiHandleId,
     pub source_type: proto::VideoSourceType,
     pub source: RtcVideoSource,
+    encoded: bool,
 }
 
 impl FfiHandle for FfiVideoSource {}
@@ -41,6 +44,23 @@ fn frame_metadata_from_proto(metadata: Option<proto::FrameMetadata>) -> Option<F
     .then_some(frame_metadata)
 }
 
+fn encoded_codec_from_proto(codec: proto::VideoCodec) -> EncodedVideoCodec {
+    match codec {
+        proto::VideoCodec::H264 => EncodedVideoCodec::H264,
+        proto::VideoCodec::H265 => EncodedVideoCodec::H265,
+        proto::VideoCodec::Vp8 => EncodedVideoCodec::VP8,
+        proto::VideoCodec::Vp9 => EncodedVideoCodec::VP9,
+        proto::VideoCodec::Av1 => EncodedVideoCodec::AV1,
+    }
+}
+
+fn encoded_frame_type_from_proto(frame_type: proto::EncodedVideoFrameType) -> EncodedFrameType {
+    match frame_type {
+        proto::EncodedVideoFrameType::EncodedVideoFrameKey => EncodedFrameType::Key,
+        proto::EncodedVideoFrameType::EncodedVideoFrameDelta => EncodedFrameType::Delta,
+    }
+}
+
 impl FfiVideoSource {
     pub fn setup(
         server: &'static server::FfiServer,
@@ -48,7 +68,7 @@ impl FfiVideoSource {
     ) -> FfiResult<proto::OwnedVideoSource> {
         let source_type = new_source.r#type();
         #[allow(unreachable_patterns)]
-        let source_inner = match source_type {
+        let (source_inner, encoded) = match source_type {
             #[cfg(not(target_arch = "wasm32"))]
             proto::VideoSourceType::VideoSourceNative => {
                 use livekit::webrtc::video_source::native::NativeVideoSource;
@@ -56,13 +76,20 @@ impl FfiVideoSource {
                 let is_screencast = new_source.is_screencast.unwrap_or(false);
                 let video_source =
                     NativeVideoSource::new(new_source.resolution.into(), is_screencast);
-                RtcVideoSource::Native(video_source)
+                (RtcVideoSource::Native(video_source), false)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            proto::VideoSourceType::VideoSourceNativeEncoded => {
+                use livekit::webrtc::video_source::native::NativeVideoSource;
+
+                let video_source = NativeVideoSource::new_encoded(new_source.resolution.into());
+                (RtcVideoSource::Native(video_source), true)
             }
             _ => return Err(FfiError::InvalidRequest("unsupported video source type".into())),
         };
 
         let handle_id = server.next_id();
-        let video_source = Self { handle_id, source_type, source: source_inner };
+        let video_source = Self { handle_id, source_type, source: source_inner, encoded };
         let source_info = proto::VideoSourceInfo::from(&video_source);
         server.store_handle(handle_id, video_source);
 
@@ -77,6 +104,12 @@ impl FfiVideoSource {
         _server: &'static server::FfiServer,
         capture: proto::CaptureVideoFrameRequest,
     ) -> FfiResult<()> {
+        if self.encoded {
+            return Err(FfiError::InvalidRequest(
+                "raw frames cannot be captured by an encoded video source".into(),
+            ));
+        }
+
         match self.source {
             #[cfg(not(target_arch = "wasm32"))]
             RtcVideoSource::Native(ref source) => {
@@ -94,12 +127,66 @@ impl FfiVideoSource {
         }
         Ok(())
     }
+
+    pub fn capture_encoded_frame(
+        &self,
+        capture: proto::CaptureEncodedVideoFrameRequest,
+    ) -> FfiResult<bool> {
+        if !self.encoded {
+            return Err(FfiError::InvalidRequest(
+                "encoded frames require an encoded video source".into(),
+            ));
+        }
+
+        match self.source {
+            #[cfg(not(target_arch = "wasm32"))]
+            RtcVideoSource::Native(ref source) => {
+                Ok(source.capture_encoded_frame(&EncodedVideoFrame {
+                    codec: encoded_codec_from_proto(capture.codec()),
+                    payload: &capture.payload,
+                    timestamp_us: capture.timestamp_us,
+                    frame_type: encoded_frame_type_from_proto(capture.frame_type()),
+                    resolution: VideoResolution { width: capture.width, height: capture.height },
+                    frame_metadata: frame_metadata_from_proto(capture.metadata),
+                }))
+            }
+            _ => Err(FfiError::InvalidRequest("unsupported video source type".into())),
+        }
+    }
+
+    pub fn take_encoded_feedback(&self) -> FfiResult<proto::GetEncodedVideoSourceFeedbackResponse> {
+        if !self.encoded {
+            return Err(FfiError::InvalidRequest(
+                "encoded feedback requires an encoded video source".into(),
+            ));
+        }
+
+        match self.source {
+            #[cfg(not(target_arch = "wasm32"))]
+            RtcVideoSource::Native(ref source) => {
+                let rate_control = source.take_rate_control_request().map(|request| {
+                    proto::EncodedVideoRateControl {
+                        target_bitrate_bps: request.target_bitrate_bps,
+                        framerate_fps: request.framerate_fps,
+                    }
+                });
+                Ok(proto::GetEncodedVideoSourceFeedbackResponse {
+                    keyframe_requested: source.take_keyframe_request(),
+                    rate_control,
+                })
+            }
+            _ => Err(FfiError::InvalidRequest("unsupported video source type".into())),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::frame_metadata_from_proto;
+    use super::{
+        encoded_codec_from_proto, encoded_frame_type_from_proto, frame_metadata_from_proto,
+    };
     use crate::proto;
+    use livekit::webrtc::video_frame::{EncodedFrameType, EncodedVideoCodec};
 
     #[test]
     fn empty_proto_frame_metadata_is_ignored() {
@@ -118,5 +205,22 @@ mod tests {
         assert_eq!(metadata.user_timestamp, Some(123));
         assert_eq!(metadata.frame_id, Some(456));
         assert_eq!(metadata.user_data, Some(vec![7, 8, 9]));
+    }
+
+    #[test]
+    fn encoded_video_enums_convert_without_relying_on_numeric_layout() {
+        assert_eq!(encoded_codec_from_proto(proto::VideoCodec::H264), EncodedVideoCodec::H264);
+        assert_eq!(encoded_codec_from_proto(proto::VideoCodec::H265), EncodedVideoCodec::H265);
+        assert_eq!(encoded_codec_from_proto(proto::VideoCodec::Vp8), EncodedVideoCodec::VP8);
+        assert_eq!(encoded_codec_from_proto(proto::VideoCodec::Vp9), EncodedVideoCodec::VP9);
+        assert_eq!(encoded_codec_from_proto(proto::VideoCodec::Av1), EncodedVideoCodec::AV1);
+        assert_eq!(
+            encoded_frame_type_from_proto(proto::EncodedVideoFrameType::EncodedVideoFrameKey),
+            EncodedFrameType::Key
+        );
+        assert_eq!(
+            encoded_frame_type_from_proto(proto::EncodedVideoFrameType::EncodedVideoFrameDelta),
+            EncodedFrameType::Delta
+        );
     }
 }

@@ -82,6 +82,33 @@ message CaptureVideoFrameRequest {
 
 message CaptureVideoFrameResponse {}
 
+// Push a pre-encoded access unit to an encoded VideoSource.
+message CaptureEncodedVideoFrameRequest {
+  required uint64 source_handle = 1;
+  required bytes payload = 2;
+  required VideoCodec codec = 3;
+  required EncodedVideoFrameType frame_type = 4;
+  required int64 timestamp_us = 5; // In microseconds
+  required uint32 width = 6;
+  required uint32 height = 7;
+  optional FrameMetadata metadata = 8;
+}
+
+message CaptureEncodedVideoFrameResponse { required bool accepted = 1; }
+
+// Return and clear feedback produced by the passthrough WebRTC encoder.
+message GetEncodedVideoSourceFeedbackRequest { required uint64 source_handle = 1; }
+
+message EncodedVideoRateControl {
+  required uint64 target_bitrate_bps = 1;
+  required double framerate_fps = 2;
+}
+
+message GetEncodedVideoSourceFeedbackResponse {
+  required bool keyframe_requested = 1;
+  optional EncodedVideoRateControl rate_control = 2;
+}
+
 message VideoConvertRequest {
   optional bool flip_y = 1;
   required VideoBufferInfo buffer = 2;
@@ -110,6 +137,11 @@ enum VideoCodec {
   AV1 = 2;
   VP9 = 3;
   H265 = 4;
+}
+
+enum EncodedVideoFrameType {
+  ENCODED_VIDEO_FRAME_KEY = 0;
+  ENCODED_VIDEO_FRAME_DELTA = 1;
 }
 
 enum VideoRotation {
@@ -207,6 +239,7 @@ message VideoSourceResolution {
 
 enum VideoSourceType {
   VIDEO_SOURCE_NATIVE = 0;
+  VIDEO_SOURCE_NATIVE_ENCODED = 1;
 }
 
 message VideoSourceInfo {
