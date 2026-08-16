@@ -331,6 +331,11 @@ class PassthroughVideoEncoder final : public VideoEncoder {
     info.supports_native_handle = true;
     info.implementation_name = "LiveKit pre-encoded passthrough";
     info.scaling_settings = VideoEncoder::ScalingSettings::kOff;
+    // The upstream encoder receives every WebRTC rate-control request through
+    // EncodedVideoFrameBuffer. WebRTC must therefore leave frame dropping to
+    // that encoder: dropping an already-encoded delta frame here can break the
+    // prediction chain until the next keyframe.
+    info.has_trusted_rate_controller = true;
     info.is_hardware_accelerated = false;
     info.supports_simulcast = false;
     info.preferred_pixel_formats = {VideoFrameBuffer::Type::kNative};
