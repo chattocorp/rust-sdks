@@ -76,6 +76,18 @@ pub const INITIAL_BUFFERED_AMOUNT_LOW_THRESHOLD: u64 = 2 * 1024 * 1024;
 /// answer does not advertise an `a=max-message-size` attribute (RFC 8841).
 pub const DEFAULT_MAX_MESSAGE_SIZE: u64 = 64000;
 
+/// Returns the H.264 profile preferred during codec negotiation.
+///
+/// Ordinary WebRTC encoders retain constrained baseline for broad browser
+/// compatibility. A pre-encoded source must instead negotiate the Main profile
+/// its external encoder is configured to produce.
+fn preferred_h264_profile_id(video_encoder: VideoEncoderBackend) -> &'static str {
+    match video_encoder {
+        VideoEncoderBackend::PreEncoded => "4d001f",
+        _ => "42e01f",
+    }
+}
+
 /// Buffered-amount low threshold for the `_data_track` DC.
 ///
 /// Kept small (vs. the 2 MiB default for reliable/lossy) so we hand at most
@@ -1917,6 +1929,7 @@ impl SessionInner {
             self.publisher_pc.peer_connection().add_transceiver(track.rtc_track(), init)?;
 
         if track.kind() == TrackKind::Video {
+            let preferred_h264_profile_id = preferred_h264_profile_id(options.video_encoder);
             transceiver.sender().set_video_encoder_backend(options.video_encoder);
 
             let capabilities = LkRuntime::instance().pc_factory().get_rtp_sender_capabilities(
@@ -1934,9 +1947,9 @@ impl SessionInner {
                 let mime_type = codec.mime_type.to_lowercase();
                 if mime_type == format!("video/{}", options.video_codec.as_str()) {
                     if let Some(sdp_fmtp_line) = codec.sdp_fmtp_line.as_ref() {
-                        // for h264 codecs that have sdpFmtpLine available, use only if the
-                        // profile-level-id is 42e01f for cross-browser compatibility
-                        if sdp_fmtp_line.contains("profile-level-id=42e01f") {
+                        if sdp_fmtp_line
+                            .contains(&format!("profile-level-id={preferred_h264_profile_id}"))
+                        {
                             matched.push(codec);
                             continue;
                         }
@@ -2573,7 +2586,20 @@ make_rtc_config!(make_rtc_config_reconnect, proto::ReconnectResponse);
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_sdp_max_message_size, DEFAULT_MAX_MESSAGE_SIZE};
+    use super::{
+        parse_sdp_max_message_size, preferred_h264_profile_id, VideoEncoderBackend,
+        DEFAULT_MAX_MESSAGE_SIZE,
+    };
+
+    #[test]
+    fn prefers_main_h264_for_pre_encoded_video() {
+        assert_eq!(preferred_h264_profile_id(VideoEncoderBackend::PreEncoded), "4d001f");
+    }
+
+    #[test]
+    fn preserves_constrained_baseline_for_normal_video_encoders() {
+        assert_eq!(preferred_h264_profile_id(VideoEncoderBackend::Auto), "42e01f");
+    }
 
     #[test]
     fn parses_max_message_size_from_application_section() {
