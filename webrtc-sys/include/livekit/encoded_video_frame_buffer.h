@@ -43,13 +43,18 @@ struct EncodedRateControlRequest {
   bool has_request = false;
   uint64_t target_bitrate_bps = 0;
   double framerate_fps = 0.0;
+  // H.264 profile_idc from the negotiated SDP profile-level-id, or zero for
+  // other codecs and formats without an explicit profile.
+  uint32_t h264_profile_idc = 0;
 };
 
 // Latest-wins rate-control mailbox shared between the pass-through encoder and
 // the Rust capture side.
 class EncodedRateControlState {
  public:
-  void Store(uint64_t target_bitrate_bps, double framerate_fps);
+  void Store(uint64_t target_bitrate_bps,
+             double framerate_fps,
+             uint32_t h264_profile_idc);
   EncodedRateControlRequest Take();
 
  private:
@@ -102,7 +107,8 @@ class EncodedVideoFrameBuffer : public webrtc::VideoFrameBuffer {
 
   // Updates the capture side with the latest encoder rate-control target.
   void set_rate_control_request(uint64_t target_bitrate_bps,
-                                double framerate_fps) const;
+                                double framerate_fps,
+                                uint32_t h264_profile_idc) const;
 
   static EncodedVideoFrameBuffer* FromNative(webrtc::VideoFrameBuffer* buffer);
 

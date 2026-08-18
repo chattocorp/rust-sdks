@@ -102,6 +102,8 @@ message GetEncodedVideoSourceFeedbackRequest { required uint64 source_handle = 1
 message EncodedVideoRateControl {
   required uint64 target_bitrate_bps = 1;
   required double framerate_fps = 2;
+  // profile_idc from the negotiated H.264 profile-level-id, or zero otherwise.
+  optional uint32 h264_profile_idc = 3;
 }
 
 message GetEncodedVideoSourceFeedbackResponse {

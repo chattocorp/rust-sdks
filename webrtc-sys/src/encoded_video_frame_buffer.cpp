@@ -24,11 +24,13 @@
 namespace livekit {
 
 void EncodedRateControlState::Store(uint64_t target_bitrate_bps,
-                                    double framerate_fps) {
+                                    double framerate_fps,
+                                    uint32_t h264_profile_idc) {
   std::lock_guard<std::mutex> lock(mutex_);
   request_.has_request = true;
   request_.target_bitrate_bps = target_bitrate_bps;
   request_.framerate_fps = framerate_fps;
+  request_.h264_profile_idc = h264_profile_idc;
 }
 
 EncodedRateControlRequest EncodedRateControlState::Take() {
@@ -106,9 +108,11 @@ void EncodedVideoFrameBuffer::request_keyframe() const {
 
 void EncodedVideoFrameBuffer::set_rate_control_request(
     uint64_t target_bitrate_bps,
-    double framerate_fps) const {
+    double framerate_fps,
+    uint32_t h264_profile_idc) const {
   if (rate_control_state_) {
-    rate_control_state_->Store(target_bitrate_bps, framerate_fps);
+    rate_control_state_->Store(target_bitrate_bps, framerate_fps,
+                               h264_profile_idc);
   }
 }
 

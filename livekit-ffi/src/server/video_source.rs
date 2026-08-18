@@ -168,6 +168,7 @@ impl FfiVideoSource {
                     proto::EncodedVideoRateControl {
                         target_bitrate_bps: request.target_bitrate_bps,
                         framerate_fps: request.framerate_fps,
+                        h264_profile_idc: Some(request.h264_profile_idc),
                     }
                 });
                 Ok(proto::GetEncodedVideoSourceFeedbackResponse {

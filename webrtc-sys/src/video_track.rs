@@ -79,6 +79,7 @@ pub mod ffi {
         pub has_request: bool,
         pub target_bitrate_bps: u64,
         pub framerate_fps: f64,
+        pub h264_profile_idc: u32,
     }
 
     extern "C++" {

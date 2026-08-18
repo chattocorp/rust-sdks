@@ -17,17 +17,20 @@
 #include "livekit/passthrough_video_encoder.h"
 
 #include <algorithm>
+#include <charconv>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
 #include "api/video/encoded_image.h"
-#include "api/video/video_frame.h"
 #include "api/video/video_codec_constants.h"
+#include "api/video/video_frame.h"
 #include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/video_encoder.h"
 #include "av1_bitstream.h"
@@ -112,6 +115,21 @@ bool IsKeyframe(livekit::EncodedFrameType frame_type) {
   return frame_type == livekit::EncodedFrameType::kKey;
 }
 
+uint32_t H264ProfileIdcFromFormat(const SdpVideoFormat& format) {
+  if (CodecTypeFromFormat(format) != webrtc::kVideoCodecH264) {
+    return 0;
+  }
+  const auto profile = format.parameters.find("profile-level-id");
+  if (profile == format.parameters.end() || profile->second.size() < 2) {
+    return 0;
+  }
+  uint32_t profile_idc = 0;
+  const char* begin = profile->second.data();
+  const char* end = begin + 2;
+  const auto result = std::from_chars(begin, end, profile_idc, 16);
+  return result.ec == std::errc() && result.ptr == end ? profile_idc : 0;
+}
+
 // SDP profile parameters constrain real encoders, not a pass-through: the
 // forwarded bytes are whatever the upstream encoder produced. Match formats
 // by codec only (H265/HEVC are aliases via CodecTypeFromFormat).
@@ -185,7 +203,10 @@ void FillSingleLayerCodecSpecific(
 class PassthroughVideoEncoder final : public VideoEncoder {
  public:
   PassthroughVideoEncoder(const Environment& env, const SdpVideoFormat& format)
-      : env_(env), format_(format), codec_type_(CodecTypeFromFormat(format)) {}
+      : env_(env),
+        format_(format),
+        codec_type_(CodecTypeFromFormat(format)),
+        h264_profile_idc_(H264ProfileIdcFromFormat(format)) {}
 
   int32_t InitEncode(const VideoCodec* codec_settings,
                      const Settings& /* settings */) override {
@@ -215,8 +236,7 @@ class PassthroughVideoEncoder final : public VideoEncoder {
   int32_t Encode(const VideoFrame& frame,
                  const std::vector<VideoFrameType>* frame_types) override {
     if (!encoded_image_callback_) {
-      RTC_LOG(LS_ERROR)
-          << "PassthroughVideoEncoder callback is not registered";
+      RTC_LOG(LS_ERROR) << "PassthroughVideoEncoder callback is not registered";
       return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
     }
 
@@ -268,8 +288,8 @@ class PassthroughVideoEncoder final : public VideoEncoder {
       livekit::av1::NormalizeForRtp(&payload);
 
       std::vector<uint8_t> sequence_header;
-      if (livekit::av1::ExtractSequenceHeaderObu(
-              payload.data(), payload.size(), &sequence_header)) {
+      if (livekit::av1::ExtractSequenceHeaderObu(payload.data(), payload.size(),
+                                                 &sequence_header)) {
         cached_sequence_header_obu_ = std::move(sequence_header);
       } else if (is_keyframe && !cached_sequence_header_obu_.empty()) {
         livekit::av1::EnsureSequenceHeaderOnKeyframe(
@@ -297,7 +317,8 @@ class PassthroughVideoEncoder final : public VideoEncoder {
     encoded_image.rotation_ = frame.rotation();
     encoded_image.content_type_ = webrtc::VideoContentType::UNSPECIFIED;
     encoded_image.timing_.flags = webrtc::VideoSendTiming::kInvalid;
-    encoded_image._frameType = FrameTypeFromBuffer(encoded_buffer->frame_type());
+    encoded_image._frameType =
+        FrameTypeFromBuffer(encoded_buffer->frame_type());
     encoded_image.SetColorSpace(frame.color_space());
     const size_t encoded_size = encoded_data->size();
     encoded_image.SetEncodedData(std::move(encoded_data));
@@ -306,9 +327,9 @@ class PassthroughVideoEncoder final : public VideoEncoder {
 
     CodecSpecificInfo codec_info;
     codec_info.codecSpecific = {};
-    FillSingleLayerCodecSpecific(&codec_info, codec_type_, encoded_buffer->width(),
-                                 encoded_buffer->height(), is_keyframe,
-                                 &av1_svc_controller_);
+    FillSingleLayerCodecSpecific(
+        &codec_info, codec_type_, encoded_buffer->width(),
+        encoded_buffer->height(), is_keyframe, &av1_svc_controller_);
 
     const auto result =
         encoded_image_callback_->OnEncodedImage(encoded_image, &codec_info);
@@ -323,7 +344,8 @@ class PassthroughVideoEncoder final : public VideoEncoder {
   void SetRates(const RateControlParameters& parameters) override {
     webrtc::MutexLock lock(&rate_control_mutex_);
     latest_rate_control_request_ = livekit::EncodedRateControlRequest{
-        true, parameters.bitrate.get_sum_bps(), parameters.framerate_fps};
+        true, parameters.bitrate.get_sum_bps(), parameters.framerate_fps,
+        h264_profile_idc_};
   }
 
   EncoderInfo GetEncoderInfo() const override {
@@ -343,8 +365,7 @@ class PassthroughVideoEncoder final : public VideoEncoder {
   }
 
  private:
-  void ForwardPendingRateControl(
-      EncodedVideoFrameBuffer* encoded_buffer) {
+  void ForwardPendingRateControl(EncodedVideoFrameBuffer* encoded_buffer) {
     std::optional<livekit::EncodedRateControlRequest> request;
     {
       webrtc::MutexLock lock(&rate_control_mutex_);
@@ -353,25 +374,33 @@ class PassthroughVideoEncoder final : public VideoEncoder {
     }
     if (request.has_value()) {
       encoded_buffer->set_rate_control_request(request->target_bitrate_bps,
-                                               request->framerate_fps);
+                                               request->framerate_fps,
+                                               request->h264_profile_idc);
     }
   }
 
   Environment env_;
   SdpVideoFormat format_;
   VideoCodecType codec_type_;
+  uint32_t h264_profile_idc_ = 0;
   VideoCodec codec_;
   EncodedImageCallback* encoded_image_callback_ = nullptr;
   ScalableVideoControllerNoLayering av1_svc_controller_;
   std::vector<uint8_t> cached_sequence_header_obu_;
   webrtc::Mutex rate_control_mutex_;
-  std::optional<livekit::EncodedRateControlRequest> latest_rate_control_request_;
+  std::optional<livekit::EncodedRateControlRequest>
+      latest_rate_control_request_;
 };
 
 }  // namespace
 
 PassthroughVideoEncoderFactory::PassthroughVideoEncoderFactory() {
-  std::map<std::string, std::string> h264_parameters = {
+  std::map<std::string, std::string> h264_main_parameters = {
+      {"profile-level-id", "4d001f"},
+      {"level-asymmetry-allowed", "1"},
+      {"packetization-mode", "1"},
+  };
+  std::map<std::string, std::string> h264_baseline_parameters = {
       {"profile-level-id", "42e01f"},
       {"level-asymmetry-allowed", "1"},
       {"packetization-mode", "1"},
@@ -383,7 +412,11 @@ PassthroughVideoEncoderFactory::PassthroughVideoEncoderFactory() {
   supported_formats_.push_back(SdpVideoFormat::VP9Profile0());
   supported_formats_.push_back(
       SdpVideoFormat(SdpVideoFormat::AV1Profile0(), scalability_modes));
-  supported_formats_.push_back(SdpVideoFormat("H264", h264_parameters));
+  // Prefer Main/CABAC for pre-encoded game video while retaining mandatory
+  // constrained-baseline interoperability when the receiver cannot decode it.
+  supported_formats_.push_back(SdpVideoFormat("H264", h264_main_parameters));
+  supported_formats_.push_back(
+      SdpVideoFormat("H264", h264_baseline_parameters));
   supported_formats_.push_back(SdpVideoFormat("H265"));
   supported_formats_.push_back(SdpVideoFormat("HEVC"));
 }
@@ -393,8 +426,8 @@ PassthroughVideoEncoderFactory::GetSupportedFormats() const {
   return supported_formats_;
 }
 
-std::vector<SdpVideoFormat>
-PassthroughVideoEncoderFactory::GetImplementations() const {
+std::vector<SdpVideoFormat> PassthroughVideoEncoderFactory::GetImplementations()
+    const {
   return supported_formats_;
 }
 

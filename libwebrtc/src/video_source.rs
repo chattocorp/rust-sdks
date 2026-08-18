@@ -27,6 +27,8 @@ pub struct EncodedRateControl {
     pub target_bitrate_bps: u64,
     /// Target frame rate in frames per second.
     pub framerate_fps: f64,
+    /// H.264 profile_idc selected by SDP negotiation, or zero otherwise.
+    pub h264_profile_idc: u32,
 }
 
 impl Default for VideoResolution {

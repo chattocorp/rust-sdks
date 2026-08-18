@@ -211,6 +211,7 @@ impl NativeVideoSource {
         request.has_request.then_some(EncodedRateControl {
             target_bitrate_bps: request.target_bitrate_bps,
             framerate_fps: request.framerate_fps,
+            h264_profile_idc: request.h264_profile_idc,
         })
     }
 

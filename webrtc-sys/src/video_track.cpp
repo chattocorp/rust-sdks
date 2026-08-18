@@ -56,7 +56,8 @@ livekit::EncodedVideoCodec ToNativeEncodedCodec(EncodedVideoCodec codec) {
   }
 }
 
-livekit::EncodedFrameType ToNativeEncodedFrameType(EncodedFrameType frame_type) {
+livekit::EncodedFrameType ToNativeEncodedFrameType(
+    EncodedFrameType frame_type) {
   switch (frame_type) {
     case EncodedFrameType::Key:
       return livekit::EncodedFrameType::kKey;
@@ -80,9 +81,10 @@ VideoTrack::~VideoTrack() {
 
 void VideoTrack::add_sink(const std::shared_ptr<NativeVideoSink>& sink) const {
   webrtc::MutexLock lock(&mutex_);
-  track()->AddOrUpdateSink(sink.get(),
-                           webrtc::VideoSinkWants());  // TODO(theomonnom): Expose
-                                                    // VideoSinkWants to Rust?
+  track()->AddOrUpdateSink(
+      sink.get(),
+      webrtc::VideoSinkWants());  // TODO(theomonnom): Expose
+                                  // VideoSinkWants to Rust?
   sinks_.push_back(sink);
 }
 
@@ -137,8 +139,11 @@ std::shared_ptr<NativeVideoSink> new_native_video_sink(
 }
 
 VideoTrackSource::InternalSource::InternalSource(
-    const VideoResolution& resolution, bool is_screencast)
-    : webrtc::AdaptedVideoTrackSource(4), resolution_(resolution), is_screencast_(is_screencast) {}
+    const VideoResolution& resolution,
+    bool is_screencast)
+    : webrtc::AdaptedVideoTrackSource(4),
+      resolution_(resolution),
+      is_screencast_(is_screencast) {}
 
 VideoTrackSource::InternalSource::~InternalSource() {}
 
@@ -199,8 +204,7 @@ bool VideoTrackSource::InternalSource::on_captured_frame(
     if (packet_trailer_handler_) {
       packet_trailer_handler_->emit_publish_timing(
           VideoPublishTimingStage::EncoderUpload,
-          frame_metadata.has_packet_trailer ? frame_metadata.user_timestamp
-                                            : 0,
+          frame_metadata.has_packet_trailer ? frame_metadata.user_timestamp : 0,
           frame_metadata.has_packet_trailer ? frame_metadata.frame_id : 0);
     }
     OnFrame(webrtc::VideoFrame::Builder()
@@ -252,7 +256,8 @@ void VideoTrackSource::InternalSource::set_packet_trailer_handler(
   packet_trailer_handler_ = std::move(handler);
 }
 
-VideoTrackSource::VideoTrackSource(const VideoResolution& resolution, bool is_screencast) {
+VideoTrackSource::VideoTrackSource(const VideoResolution& resolution,
+                                   bool is_screencast) {
   source_ = webrtc::make_ref_counted<InternalSource>(resolution, is_screencast);
 }
 
@@ -267,12 +272,13 @@ bool VideoTrackSource::on_captured_frame(
   return source_->on_captured_frame(rtc_frame, frame_metadata);
 }
 
-bool VideoTrackSource::capture_dmabuf_frame(int dmabuf_fd,
-                                            int width,
-                                            int height,
-                                            int pixel_format,
-                                            int64_t timestamp_us,
-                                            const FrameMetadata& frame_metadata) const {
+bool VideoTrackSource::capture_dmabuf_frame(
+    int dmabuf_fd,
+    int width,
+    int height,
+    int pixel_format,
+    int64_t timestamp_us,
+    const FrameMetadata& frame_metadata) const {
   auto dmabuf_pixel_format =
       static_cast<livekit::DmaBufPixelFormat>(pixel_format);
   auto buffer = webrtc::make_ref_counted<livekit::DmaBufVideoFrameBuffer>(
@@ -324,9 +330,9 @@ bool VideoTrackSource::take_keyframe_request() const {
 
 EncodedRateControlRequest VideoTrackSource::take_rate_control_request() const {
   auto request = source_->rate_control_state()->Take();
-  return EncodedRateControlRequest{request.has_request,
-                                   request.target_bitrate_bps,
-                                   request.framerate_fps};
+  return EncodedRateControlRequest{
+      request.has_request, request.target_bitrate_bps, request.framerate_fps,
+      request.h264_profile_idc};
 }
 
 void VideoTrackSource::set_packet_trailer_handler(
@@ -340,7 +346,8 @@ webrtc::scoped_refptr<VideoTrackSource::InternalSource> VideoTrackSource::get()
 }
 
 std::shared_ptr<VideoTrackSource> new_video_track_source(
-    const VideoResolution& resolution, bool is_screencast) {
+    const VideoResolution& resolution,
+    bool is_screencast) {
   return std::make_shared<VideoTrackSource>(resolution, is_screencast);
 }
 
