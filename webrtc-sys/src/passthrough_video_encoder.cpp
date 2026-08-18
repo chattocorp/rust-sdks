@@ -395,8 +395,8 @@ class PassthroughVideoEncoder final : public VideoEncoder {
 }  // namespace
 
 PassthroughVideoEncoderFactory::PassthroughVideoEncoderFactory() {
-  std::map<std::string, std::string> h264_main_parameters = {
-      {"profile-level-id", "4d001f"},
+  std::map<std::string, std::string> h264_high_parameters = {
+      {"profile-level-id", "640032"},
       {"level-asymmetry-allowed", "1"},
       {"packetization-mode", "1"},
   };
@@ -412,9 +412,9 @@ PassthroughVideoEncoderFactory::PassthroughVideoEncoderFactory() {
   supported_formats_.push_back(SdpVideoFormat::VP9Profile0());
   supported_formats_.push_back(
       SdpVideoFormat(SdpVideoFormat::AV1Profile0(), scalability_modes));
-  // Prefer Main/CABAC for pre-encoded game video while retaining mandatory
+  // Prefer the High profile advertised by LiveKit Server while retaining
   // constrained-baseline interoperability when the receiver cannot decode it.
-  supported_formats_.push_back(SdpVideoFormat("H264", h264_main_parameters));
+  supported_formats_.push_back(SdpVideoFormat("H264", h264_high_parameters));
   supported_formats_.push_back(
       SdpVideoFormat("H264", h264_baseline_parameters));
   supported_formats_.push_back(SdpVideoFormat("H265"));

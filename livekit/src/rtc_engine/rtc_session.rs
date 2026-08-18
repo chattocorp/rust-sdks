@@ -79,11 +79,11 @@ pub const DEFAULT_MAX_MESSAGE_SIZE: u64 = 64000;
 /// Returns the H.264 profile preferred during codec negotiation.
 ///
 /// Ordinary WebRTC encoders retain constrained baseline for broad browser
-/// compatibility. A pre-encoded source must instead negotiate the Main profile
-/// its external encoder is configured to produce.
+/// compatibility. A pre-encoded source instead prefers the High profile that
+/// LiveKit Server advertises for higher-efficiency H.264 encoding.
 fn preferred_h264_profile_id(video_encoder: VideoEncoderBackend) -> &'static str {
     match video_encoder {
-        VideoEncoderBackend::PreEncoded => "4d001f",
+        VideoEncoderBackend::PreEncoded => "640032",
         _ => "42e01f",
     }
 }
@@ -2592,8 +2592,8 @@ mod tests {
     };
 
     #[test]
-    fn prefers_main_h264_for_pre_encoded_video() {
-        assert_eq!(preferred_h264_profile_id(VideoEncoderBackend::PreEncoded), "4d001f");
+    fn prefers_high_h264_for_pre_encoded_video() {
+        assert_eq!(preferred_h264_profile_id(VideoEncoderBackend::PreEncoded), "640032");
     }
 
     #[test]
